@@ -1,0 +1,74 @@
+import numpy as np
+from tensorflow.keras.applications import VGG16
+from tensorflow.keras.preprocessing import image
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Dense, Embedding, LSTM, Add
+from tensorflow.keras.utils import pad_sequences
+import os
+
+# Load VGG16 model for feature extraction
+def extract_features(img_path):
+    model = VGG16(weights='imagenet', include_top=False)
+    model.trainable = False
+    img = image.load_img(img_path, target_size=(224, 224))
+    img_array = image.img_to_array(img)
+    img_array = np.expand_dims(img_array, axis=0)
+    img_array = preprocess_input(img_array)
+    features = model.predict(img_array)
+    return features.flatten()
+
+# Tokenize captions
+def tokenize_captions(captions):
+    tokenizer = Tokenizer()
+    tokenizer.fit_on_texts(captions)
+    return tokenizer
+
+# Build the RNN model
+def build_model(vocab_size, max_length):
+    input1 = Input(shape=(4096,))
+    fe1 = Dense(256, activation='relu')(input1)
+    input2 = Input(shape=(max_length,))
+    se1 = Embedding(vocab_size, 256, mask_zero=True)(input2)
+    se2 = LSTM(256)(se1)
+    decoder1 = Add()([fe1, se2])
+    decoder2 = Dense(256, activation='relu')(decoder1)
+    output = Dense(vocab_size, activation='softmax')(decoder2)
+    model = Model(inputs=[input1, input2], outputs=output)
+    model.compile(loss='categorical_crossentropy', optimizer='adam')
+    return model
+
+# Generate captions
+def generate_caption(model, tokenizer, photo, max_length):
+    caption = 'startseq'
+    for _ in range(max_length):
+        sequence = tokenizer.texts_to_sequences([caption])[0]
+        sequence = pad_sequences([sequence], maxlen=max_length)
+        yhat = model.predict([photo, sequence], verbose=0)
+        yhat = np.argmax(yhat)
+        word = tokenizer.index_word[yhat]
+        if word == 'endseq':
+            break
+        caption += ' ' + word
+    return caption
+
+# Example usage
+if __name__ == "__main__":
+    # Load your image and captions here
+    img_path = 'path/to/your/image.jpg'
+    captions = ['A man is playing guitar.', 'A person is playing a musical instrument.']  # Example captions
+
+    # Extract features from the image
+    photo_features = extract_features(img_path)
+
+    # Tokenize the captions
+    tokenizer = tokenize_captions(captions)
+    vocab_size = len(tokenizer.word_index) + 1
+    max_length = max(len(c.split()) for c in captions)
+
+    # Build the model
+    model = build_model(vocab_size, max_length)
+
+    # Generate caption for the image
+    caption = generate_caption(model, tokenizer, photo_features.reshape(1, -1), max_length)
+    print("Generated Caption:", caption)
